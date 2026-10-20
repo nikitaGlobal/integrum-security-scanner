@@ -129,5 +129,12 @@ final class WpTransientJobStore implements JobStoreInterface {
 		if ( array() !== $progress ) {
 			set_transient( self::PREFIX . 'progress_' . $job_id, $progress, self::TTL );
 		}
+
+		// The consecutive-failure counter drives the MAX_STATUS_FAILURES
+		// escalation; losing it mid-scan would restart the count.
+		$failures = $this->load_failures( $job_id );
+		if ( $failures > 0 ) {
+			set_transient( self::PREFIX . 'fail_' . $job_id, $failures, self::TTL );
+		}
 	}
 }

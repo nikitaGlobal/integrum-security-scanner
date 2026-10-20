@@ -208,6 +208,27 @@ final class ScanStateExpiryTest extends TestCase {
 	}
 
 	/**
+	 * The consecutive-failure counter must survive past the original 1-hour
+	 * TTL while the poller keeps calling refresh_ttl(), or the
+	 * MAX_STATUS_FAILURES escalation would silently restart from zero.
+	 */
+	public function test_refresh_ttl_also_extends_the_failure_counter(): void {
+		$store = new WpTransientJobStore();
+		$store->save_failures( 'job-kept', 3 );
+		$store->save_failures( 'job-lost', 3 );
+
+		// 50 minutes in: refresh before the original hour runs out.
+		$GLOBALS['__llar_test_now'] += 50 * 60;
+		$store->refresh_ttl( 'job-kept' );
+
+		// 61 minutes after the start: past the original TTL.
+		$GLOBALS['__llar_test_now'] += 11 * 60;
+
+		$this->assertSame( 3, $store->load_failures( 'job-kept' ), 'Refreshed counter must survive.' );
+		$this->assertSame( 0, $store->load_failures( 'job-lost' ), 'Unrefreshed counter must expire.' );
+	}
+
+	/**
 	 * Builds a scanner wired with the production job store and collector.
 	 *
 	 * @param MockHttpClient $http   HTTP mock.

@@ -100,7 +100,9 @@ export function initPolling( jobId ) {
 		++consecutiveErrors;
 
 		if ( consecutiveErrors >= MAX_CONSECUTIVE_ERRORS ) {
-			progressLabel.textContent = CFG.i18n ? CFG.i18n.error : 'error';
+			// The job keeps running server-side — do not claim it failed.
+			progressLabel.textContent = ( CFG.i18n && CFG.i18n.connectionLost )
+				|| 'Connection lost. Reload the page to resume monitoring.';
 			return;
 		}
 

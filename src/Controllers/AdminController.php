@@ -137,6 +137,7 @@ final class AdminController {
 				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 				'nonce'   => wp_create_nonce( self::NONCE_POLL ),
 				'i18n'    => array(
+					'connectionLost' => __( 'Connection lost. Reload the page to resume monitoring.', 'integrum-security-scanner' ),
 					'error'          => __( 'Scan failed. Please try again.', 'integrum-security-scanner' ),
 					'retrying'       => __( 'Connection lost, retrying…', 'integrum-security-scanner' ),
 					'saveKey'        => __( 'Save key', 'integrum-security-scanner' ),
@@ -324,6 +325,8 @@ final class AdminController {
 		}
 
 		set_transient( 'integrum_security_scanner_active_job', $job_id, HOUR_IN_SECONDS );
+		// Clear any stale rate-limit marker so a fresh scan starts refreshing immediately.
+		delete_transient( 'integrum_security_scanner_active_job_touch' );
 		// One-shot marker consumed by render() on the FIRST page load after the
 		// PRG redirect. It is NOT a persistent "scan in progress" flag: once
 		// consumed, a page reload no longer surfaces a running scan, so the UI
@@ -368,6 +371,7 @@ final class AdminController {
 
 		if ( in_array( $status['status'], array( 'completed', 'done', 'failed' ), true ) ) {
 			delete_transient( 'integrum_security_scanner_active_job' );
+			delete_transient( 'integrum_security_scanner_active_job_touch' );
 
 			// Archive the run once, at the moment completion is first observed.
 			// Failed scans are not archived: an empty "0 problems" row would read
@@ -379,8 +383,14 @@ final class AdminController {
 		} else {
 			// Keep the job pointer alive while the page keeps polling: long
 			// scans outlive the 1-hour transient TTL, and losing the job id
-			// here would orphan a still-running scan.
-			set_transient( 'integrum_security_scanner_active_job', $job_id, HOUR_IN_SECONDS );
+			// here would orphan a still-running scan. Rate-limited via a
+			// marker transient so the options table is not written on every
+			// 4-second poll.
+			$touch = 'integrum_security_scanner_active_job_touch';
+			if ( false === get_transient( $touch ) ) {
+				set_transient( $touch, 1, 30 * MINUTE_IN_SECONDS );
+				set_transient( 'integrum_security_scanner_active_job', $job_id, HOUR_IN_SECONDS );
+			}
 		}
 
 		wp_send_json_success( $status );
@@ -402,6 +412,7 @@ final class AdminController {
 		}
 
 		delete_transient( 'integrum_security_scanner_active_job' );
+		delete_transient( 'integrum_security_scanner_active_job_touch' );
 
 		wp_send_json_success( array( 'status' => 'stopped' ) );
 	}
