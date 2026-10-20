@@ -31,6 +31,15 @@ final class WpTransientJobStore implements JobStoreInterface {
 	private const TTL = HOUR_IN_SECONDS;
 
 	/**
+	 * Minimum interval between TTL refreshes of the stored payloads.
+	 *
+	 * Rewriting the file map / done set on every 4s poll would hammer the
+	 * options table (the map alone can be hundreds of KB on large sites), so
+	 * the rewrite is gated by a short-lived marker transient.
+	 */
+	private const TOUCH_INTERVAL = 1800;
+
+	/**
 	 * {@inheritdoc}
 	 */
 	public function save_file_map( string $job_id, array $payload ): void {
@@ -94,5 +103,38 @@ final class WpTransientJobStore implements JobStoreInterface {
 	 */
 	public function delete_failures( string $job_id ): void {
 		delete_transient( self::PREFIX . 'fail_' . $job_id );
+	}
+
+	/**
+	 * {@inheritdoc}
+	 */
+	public function refresh_ttl( string $job_id ): void {
+		$touch_key = self::PREFIX . 'touch_' . $job_id;
+		if ( false !== get_transient( $touch_key ) ) {
+			return; // Refreshed recently.
+		}
+		set_transient( $touch_key, 1, self::TOUCH_INTERVAL );
+
+		$map = $this->load_file_map( $job_id );
+		if ( array() !== $map ) {
+			set_transient( self::PREFIX . 'job_' . $job_id, $map, self::TTL );
+		}
+
+		$done = $this->load_done( $job_id );
+		if ( array() !== $done ) {
+			set_transient( self::PREFIX . 'done_' . $job_id, $done, self::TTL );
+		}
+
+		$progress = $this->load_progress( $job_id );
+		if ( array() !== $progress ) {
+			set_transient( self::PREFIX . 'progress_' . $job_id, $progress, self::TTL );
+		}
+
+		// The consecutive-failure counter drives the MAX_STATUS_FAILURES
+		// escalation; losing it mid-scan would restart the count.
+		$failures = $this->load_failures( $job_id );
+		if ( $failures > 0 ) {
+			set_transient( self::PREFIX . 'fail_' . $job_id, $failures, self::TTL );
+		}
 	}
 }

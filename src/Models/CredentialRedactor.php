@@ -34,6 +34,11 @@ final class CredentialRedactor {
 	);
 
 	/**
+	 * Deepest nested level walked; deeper subtrees are redacted wholesale.
+	 */
+	private const MAX_DEPTH = 5;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param CredentialStorageInterface|null $storage Optional storage for known site key value.
@@ -43,6 +48,9 @@ final class CredentialRedactor {
 	/**
 	 * Returns a copy of $context with secrets replaced by [REDACTED].
 	 *
+	 * Nested arrays are walked (bounded by MAX_DEPTH) so a structured context
+	 * such as array( 'request' => array( 'headers' => ... ) ) cannot leak.
+	 *
 	 * @param array<string, mixed> $context Context.
 	 * @return array<string, mixed>
 	 */
@@ -50,11 +58,30 @@ final class CredentialRedactor {
 		$known = $this->storage?->get_site_key();
 		$known = ( null !== $known && '' !== $known ) ? $known : null;
 
+		return $this->redact_array( $context, $known, 0 );
+	}
+
+	/**
+	 * Recursively redacts one nesting level.
+	 *
+	 * @param array<string, mixed> $context Context.
+	 * @param string|null          $known   Known site key value.
+	 * @param int                  $depth   Current depth.
+	 * @return array<string, mixed>
+	 */
+	private function redact_array( array $context, ?string $known, int $depth ): array {
 		$out = array();
 		foreach ( $context as $key => $value ) {
 			$name = strtolower( (string) $key );
 			if ( in_array( $name, self::SENSITIVE_KEYS, true ) ) {
 				$out[ $key ] = '[REDACTED]';
+				continue;
+			}
+
+			if ( is_array( $value ) ) {
+				$out[ $key ] = $depth < self::MAX_DEPTH
+					? $this->redact_array( $value, $known, $depth + 1 )
+					: '[REDACTED]';
 				continue;
 			}
 

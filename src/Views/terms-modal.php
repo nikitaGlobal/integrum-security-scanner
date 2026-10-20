@@ -30,7 +30,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	</div>
 
 	<div class="space-y-3 px-6 py-4 text-sm leading-relaxed text-slate-600">
-		<p><?php
+		<p>
+		<?php
 		printf(
 			wp_kses(
 				/* translators: 1: Integrum provider, 2: Imunify partner. */
@@ -40,8 +41,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 			'<strong>' . esc_html__( 'Limit Login Attempts Reloaded', 'integrum-security-scanner' ) . '</strong>',
 			'<strong>' . esc_html__( 'Imunify by CloudLinux.', 'integrum-security-scanner' ) . '</strong>'
 		);
-		?></p>
-		<p><?php
+		?>
+		</p>
+		<p>
+		<?php
 		printf(
 			wp_kses(
 				/* translators: %s: CloudLinux processor. */
@@ -50,10 +53,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 			),
 			'<strong>' . esc_html__( 'Cloud Linux Software, Inc. using Imunify Connect.', 'integrum-security-scanner' ) . '</strong>'
 		);
-		?></p>
+		?>
+		</p>
 		<p><?php esc_html_e( 'Your website domain and registration email address will also be transmitted for account registration, service operation, and service-related notifications. This information will not be shared with other third parties for marketing or unrelated purposes.', 'integrum-security-scanner' ); ?></p>
 		<p><?php esc_html_e( 'Because website files may contain personal, confidential, or other protected information, by enabling and using malware scanning you confirm that you are authorized to submit these files for security analysis.', 'integrum-security-scanner' ); ?></p>
-		<p><?php
+		<p>
+		<?php
 		printf(
 			wp_kses(
 				/* translators: %s: Privacy Policy label. */
@@ -62,7 +67,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 			),
 			'<strong>' . esc_html__( 'Privacy Policy', 'integrum-security-scanner' ) . '</strong>'
 		);
-		?></p>
+		?>
+		</p>
 	</div>
 
 	<div class="border-t border-slate-200 px-6 py-4 text-sm leading-relaxed text-slate-600">
