@@ -65,6 +65,27 @@ final class WpLoggerTest extends TestCase {
 		$this->assertStringNotContainsString( 'super-secret-key', $this->lines[0] );
 	}
 
+	public function test_redaction_walks_nested_context(): void {
+		$GLOBALS['__llar_filters'][ WpLogger::ENABLED_FILTER ] = true;
+
+		$storage = new InMemoryCredentialStorage();
+		$storage->set_credentials( 'site-id', 'super-secret-key' );
+
+		$this->make_logger( $storage )->error(
+			'boom',
+			array(
+				'request' => array(
+					'headers' => array( 'X-Site-Key' => 'super-secret-key' ),
+					'detail'  => 'value with super-secret-key inside',
+				),
+			)
+		);
+
+		$this->assertCount( 1, $this->lines );
+		$this->assertStringNotContainsString( 'super-secret-key', $this->lines[0] );
+		$this->assertStringContainsString( '[REDACTED]', $this->lines[0] );
+	}
+
 	/**
 	 * Builds a logger that collects lines instead of calling error_log().
 	 *

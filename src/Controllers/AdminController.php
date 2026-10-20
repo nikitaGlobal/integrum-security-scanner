@@ -14,6 +14,7 @@ use Integrum\SecurityScanner\Contracts\FileCollectorInterface;
 use Integrum\SecurityScanner\Contracts\LoggerInterface;
 use Integrum\SecurityScanner\Contracts\ScanException;
 use Integrum\SecurityScanner\Contracts\ScannerInterface;
+use Integrum\SecurityScanner\Models\ActiveJob;
 use Integrum\SecurityScanner\Models\ScanHistoryStorage;
 use Integrum\SecurityScanner\Models\ScanResult;
 use Integrum\SecurityScanner\Services\LicensingService;
@@ -47,6 +48,7 @@ final class AdminController {
 	 * @param LoggerInterface            $logger   Logger.
 	 * @param FileCollectorInterface     $file_collector Candidate file list builder (scan preview).
 	 * @param ScanHistoryStorage|null    $history  Finished-run history (defaults to a new store).
+	 * @param ActiveJob|null             $active_job Active-job pointer (defaults to new).
 	 */
 	public function __construct(
 		private ScannerInterface $scanner,
@@ -54,9 +56,11 @@ final class AdminController {
 		private LicensingService $licensing,
 		private LoggerInterface $logger,
 		private FileCollectorInterface $file_collector,
-		private ?ScanHistoryStorage $history = null
+		private ?ScanHistoryStorage $history = null,
+		private ?ActiveJob $active_job = null
 	) {
-		$this->history = $this->history ?? new ScanHistoryStorage();
+		$this->history    = $this->history ?? new ScanHistoryStorage();
+		$this->active_job = $this->active_job ?? new ActiveJob();
 	}
 
 	/**
@@ -324,9 +328,7 @@ final class AdminController {
 			return;
 		}
 
-		set_transient( 'integrum_security_scanner_active_job', $job_id, HOUR_IN_SECONDS );
-		// Clear any stale rate-limit marker so a fresh scan starts refreshing immediately.
-		delete_transient( 'integrum_security_scanner_active_job_touch' );
+		$this->active_job->start( $job_id );
 		// One-shot marker consumed by render() on the FIRST page load after the
 		// PRG redirect. It is NOT a persistent "scan in progress" flag: once
 		// consumed, a page reload no longer surfaces a running scan, so the UI
@@ -352,12 +354,7 @@ final class AdminController {
 			wp_send_json_error( array( 'message' => 'forbidden' ), 403 );
 		}
 
-		$job_id = '';
-		if ( isset( $_POST['job_id'] ) ) {
-			$job_id = sanitize_text_field( wp_unslash( $_POST['job_id'] ) );
-		} elseif ( get_transient( 'integrum_security_scanner_active_job' ) ) {
-			$job_id = (string) get_transient( 'integrum_security_scanner_active_job' );
-		}
+		$job_id = $this->resolve_job_id();
 
 		if ( '' === $job_id ) {
 			wp_send_json_error( array( 'message' => 'no job' ) );
@@ -370,8 +367,7 @@ final class AdminController {
 		}
 
 		if ( in_array( $status['status'], array( 'completed', 'done', 'failed' ), true ) ) {
-			delete_transient( 'integrum_security_scanner_active_job' );
-			delete_transient( 'integrum_security_scanner_active_job_touch' );
+			$this->active_job->clear();
 
 			// Archive the run once, at the moment completion is first observed.
 			// Failed scans are not archived: an empty "0 problems" row would read
@@ -383,14 +379,9 @@ final class AdminController {
 		} else {
 			// Keep the job pointer alive while the page keeps polling: long
 			// scans outlive the 1-hour transient TTL, and losing the job id
-			// here would orphan a still-running scan. Rate-limited via a
-			// marker transient so the options table is not written on every
-			// 4-second poll.
-			$touch = 'integrum_security_scanner_active_job_touch';
-			if ( false === get_transient( $touch ) ) {
-				set_transient( $touch, 1, 30 * MINUTE_IN_SECONDS );
-				set_transient( 'integrum_security_scanner_active_job', $job_id, HOUR_IN_SECONDS );
-			}
+			// here would orphan a still-running scan. touch() rate-limits the
+			// write so the options table is not touched on every 4s poll.
+			$this->active_job->touch( $job_id );
 		}
 
 		wp_send_json_success( $status );
@@ -411,8 +402,7 @@ final class AdminController {
 			wp_send_json_error( array( 'message' => 'forbidden' ), 403 );
 		}
 
-		delete_transient( 'integrum_security_scanner_active_job' );
-		delete_transient( 'integrum_security_scanner_active_job_touch' );
+		$this->active_job->clear();
 
 		wp_send_json_success( array( 'status' => 'stopped' ) );
 	}
@@ -494,14 +484,7 @@ final class AdminController {
 			wp_send_json_error( array( 'message' => 'forbidden' ), 403 );
 		}
 
-		// TODO(dry): this job_id resolution block is duplicated in ajax_status();
-		// extract a private resolve_job_id() helper returning `?string`.
-		$job_id = '';
-		if ( isset( $_POST['job_id'] ) ) {
-			$job_id = sanitize_text_field( wp_unslash( $_POST['job_id'] ) );
-		} elseif ( get_transient( 'integrum_security_scanner_active_job' ) ) {
-			$job_id = (string) get_transient( 'integrum_security_scanner_active_job' );
-		}
+		$job_id = $this->resolve_job_id();
 
 		if ( '' === $job_id ) {
 			wp_send_json_error( array( 'message' => 'no job' ) );
@@ -514,6 +497,39 @@ final class AdminController {
 		}
 
 		wp_send_json_success( array( 'results' => $this->serialize_results( $results ) ) );
+	}
+
+	/**
+	 * Resolves the job id from the request, falling back to the active job.
+	 *
+	 * The POST value is validated by sanitize_job_id() because job ids become
+	 * part of transient names.
+	 *
+	 * @return string Job id, or an empty string when there is none.
+	 */
+	private function resolve_job_id(): string {
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- both callers verify the AJAX nonce first.
+		if ( isset( $_POST['job_id'] ) ) {
+			return $this->sanitize_job_id( sanitize_text_field( wp_unslash( $_POST['job_id'] ) ) );
+		}
+		// phpcs:enable WordPress.Security.NonceVerification.Missing
+
+		return $this->active_job->get();
+	}
+
+	/**
+	 * Validates a job id received from the browser.
+	 *
+	 * The id ends up in transient option names, which are limited to 191
+	 * characters, so an unexpected format is rejected instead of truncated.
+	 * The allowed set covers UUID/ULID-style ids while blocking whitespace,
+	 * control characters and path separators.
+	 *
+	 * @param string $job_id Raw job id.
+	 * @return string Valid id, or an empty string when rejected.
+	 */
+	private function sanitize_job_id( string $job_id ): string {
+		return 1 === preg_match( '/^[A-Za-z0-9._:-]{1,96}$/', $job_id ) ? $job_id : '';
 	}
 
 	/**

@@ -203,10 +203,7 @@ final class ImunifyScanner implements \Integrum\SecurityScanner\Contracts\Scanne
 					)
 				);
 
-				return array(
-					'status'       => 'failed',
-					'progress_pct' => 0,
-				);
+				return $this->failed_status();
 			}
 
 			// A needs_* action referencing a file_index that is not in the
@@ -223,10 +220,7 @@ final class ImunifyScanner implements \Integrum\SecurityScanner\Contracts\Scanne
 					)
 				);
 
-				return array(
-					'status'       => 'failed',
-					'progress_pct' => 0,
-				);
+				return $this->failed_status();
 			}
 
 			$this->process_actions( $scan_job_id, $key, $body );
@@ -249,10 +243,7 @@ final class ImunifyScanner implements \Integrum\SecurityScanner\Contracts\Scanne
 
 			if ( $failures >= self::MAX_STATUS_FAILURES ) {
 				$this->store->delete_failures( $scan_job_id );
-				return array(
-					'status'       => 'failed',
-					'progress_pct' => 0,
-				);
+				return $this->failed_status();
 			}
 
 			return array(
@@ -376,6 +367,18 @@ final class ImunifyScanner implements \Integrum\SecurityScanner\Contracts\Scanne
 	 */
 	private function fetch_results( string $job_id, string $key ): array {
 		return $this->call( 'GET', '/jobs/' . rawurlencode( $job_id ) . '/results', $key );
+	}
+
+	/**
+	 * Builds the terminal "failed" status payload.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function failed_status(): array {
+		return array(
+			'status'       => 'failed',
+			'progress_pct' => 0,
+		);
 	}
 
 	/**
