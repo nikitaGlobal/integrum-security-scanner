@@ -1,0 +1,69 @@
+<?xml version="1.0"?>
+<ruleset name="LlarImunify">
+    <description>Coding standards for the File Security Scanner plugin.</description>
+
+    <file>src</file>
+    <file>tests</file>
+
+    <exclude-pattern>*/vendor/*</exclude-pattern>
+    <exclude-pattern>*/node_modules/*</exclude-pattern>
+
+    <!-- Tests use plain PHP filesystem/json functions for tmp fixtures. -->
+    <rule ref="WordPress.WP.AlternativeFunctions.file_system_operations_mkdir">
+        <exclude-pattern>*/tests/*</exclude-pattern>
+    </rule>
+    <rule ref="WordPress.WP.AlternativeFunctions.file_system_operations_rmdir">
+        <exclude-pattern>*/tests/*</exclude-pattern>
+    </rule>
+    <rule ref="WordPress.WP.AlternativeFunctions.file_system_operations_file_put_content*">
+        <exclude-pattern>*/tests/*</exclude-pattern>
+    </rule>
+    <rule ref="WordPress.WP.AlternativeFunctions.unlink_unlink">
+        <exclude-pattern>*/tests/*</exclude-pattern>
+    </rule>
+    <rule ref="WordPress.WP.AlternativeFunctions.json_encode_json_encode">
+        <exclude-pattern>*/tests/*</exclude-pattern>
+    </rule>
+
+    <arg name="extensions" value="php"/>
+    <arg name="colors"/>
+    <arg value="sp"/><!-- Show sniff codes + progress. -->
+
+    <rule ref="WordPress">
+        <!-- Allow class-based code with PHP 8.1+ idioms. -->
+        <exclude name="WordPress.Files.FileName"/>
+        <exclude name="WordPress.NamingConventions.ValidFunctionName.MethodNameInvalid"/>
+        <exclude name="WordPress.NamingConventions.ValidVariableName"/>
+        <exclude name="Generic.Arrays.DisallowShortArraySyntax"/>
+        <!-- Exception messages are not HTML output; this sniff always false-positives on `throw new $e`. -->
+        <exclude name="WordPress.Security.EscapeOutput.ExceptionNotEscaped"/>
+    </rule>
+
+    <!-- Documentation standards are intentionally relaxed to keep the code
+         minimal: per-property and per-parameter docblocks are noise for small,
+         well-typed methods. Real intent is documented at class/method level. -->
+    <rule ref="Squiz.Commenting.FunctionComment.Missing">
+        <severity>0</severity>
+    </rule>
+    <rule ref="Squiz.Commenting.FunctionComment.MissingParamTag">
+        <severity>0</severity>
+    </rule>
+    <rule ref="Squiz.Commenting.VariableComment.Missing">
+        <severity>0</severity>
+    </rule>
+    <rule ref="Squiz.Commenting.VariableComment.MissingVar">
+        <severity>0</severity>
+    </rule>
+    <rule ref="Squiz.Commenting.ClassComment.Missing">
+        <severity>0</severity>
+    </rule>
+    <rule ref="Generic.Commenting.DocComment.MissingShort">
+        <severity>0</severity>
+    </rule>
+
+    <!-- PHPCompatibilityWP is intentionally omitted: the bundled sniff crashes
+         on PHP 8.2 due to a `trim( null )` deprecation in its base class and
+         blocks all real checks. Re-enable once upstream ships a fix. -->
+
+    <config name="minimum_supported_wp_version" value="6.0"/>
+</ruleset>

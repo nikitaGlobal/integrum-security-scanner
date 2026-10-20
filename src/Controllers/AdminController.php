@@ -138,6 +138,7 @@ final class AdminController {
 				'nonce'   => wp_create_nonce( self::NONCE_POLL ),
 				'i18n'    => array(
 					'error'          => __( 'Scan failed. Please try again.', 'integrum-security-scanner' ),
+					'retrying'       => __( 'Connection lost, retrying…', 'integrum-security-scanner' ),
 					'saveKey'        => __( 'Save key', 'integrum-security-scanner' ),
 					'register'       => __( 'Register', 'integrum-security-scanner' ),
 					'showKey'        => __( 'Show site key', 'integrum-security-scanner' ),
@@ -375,6 +376,11 @@ final class AdminController {
 			if ( in_array( $status['status'], array( 'completed', 'done' ), true ) ) {
 				$this->record_history( $job_id, $status );
 			}
+		} else {
+			// Keep the job pointer alive while the page keeps polling: long
+			// scans outlive the 1-hour transient TTL, and losing the job id
+			// here would orphan a still-running scan.
+			set_transient( 'integrum_security_scanner_active_job', $job_id, HOUR_IN_SECONDS );
 		}
 
 		wp_send_json_success( $status );
@@ -789,7 +795,7 @@ final class AdminController {
 	/**
 	 * Lists immediate child directories, including dot-prefixed ones.
 	 *
-	 * glob() skips hidden entries on Unix; scandir() does not.
+	 * Glob() skips hidden entries on Unix; scandir() does not.
 	 *
 	 * @param string $abs Absolute directory path.
 	 * @return string[] Absolute child directory paths.

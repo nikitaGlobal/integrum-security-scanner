@@ -137,7 +137,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 							<button
 								type="button"
 								class="iss-terms-open cursor-pointer border-0 bg-transparent p-0 text-inherit underline decoration-dotted underline-offset-2 hover:text-slate-800"
-							><?php esc_html_e( 'Limit Login Attempts Reloaded Terms of Service and Malware Scanning Terms', 'integrum-security-scanner' ); ?></button><?php
+							><?php esc_html_e( 'Limit Login Attempts Reloaded Terms of Service and Malware Scanning Terms', 'integrum-security-scanner' ); ?></button>
+							<?php
 							printf(
 								wp_kses(
 									/* translators: 1: Privacy Policy label, 2: Imunify partner. */

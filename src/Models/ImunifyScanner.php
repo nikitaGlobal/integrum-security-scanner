@@ -185,7 +185,51 @@ final class ImunifyScanner implements \Integrum\SecurityScanner\Contracts\Scanne
 
 		try {
 			$results = $this->fetch_results( $scan_job_id, $key );
-			$this->process_actions( $scan_job_id, $key, $results['body'] );
+			$body    = $results['body'];
+			$map     = $this->store->load_file_map( $scan_job_id );
+
+			// The per-job state (file map, done set, progress) lives in
+			// transients with a 1-hour TTL. When it expires while the job is
+			// still processing, the client can no longer satisfy any pending
+			// needs_sha256 / needs_upload action and would silently spin in
+			// "processing" forever (observed in production as a scan stuck
+			// for hours). Fail fast and journal it instead.
+			if ( $this->job_state_expired( $map, $body ) ) {
+				$this->logger->error(
+					'scan job state expired',
+					array(
+						'job_id' => $scan_job_id,
+						'hint'   => 'job transients expired while the scan is still processing; failing the job instead of looping forever',
+					)
+				);
+
+				return array(
+					'status'       => 'failed',
+					'progress_pct' => 0,
+				);
+			}
+
+			// A needs_* action referencing a file_index that is not in the
+			// manifest map can never be satisfied either — same eternal
+			// "processing" loop, different trigger. Fail fast and journal.
+			$paths      = is_array( $map['paths'] ?? null ) ? $map['paths'] : array();
+			$unresolved = $this->count_unresolvable_actions( $body, $paths );
+			if ( $unresolved > 0 ) {
+				$this->logger->error(
+					'pending scan action could not be resolved to a file path',
+					array(
+						'job_id'     => $scan_job_id,
+						'unresolved' => $unresolved,
+					)
+				);
+
+				return array(
+					'status'       => 'failed',
+					'progress_pct' => 0,
+				);
+			}
+
+			$this->process_actions( $scan_job_id, $key, $body );
 		} catch ( ScanException $e ) {
 			if ( 401 === $e->getCode() ) {
 				throw $e;
@@ -219,14 +263,17 @@ final class ImunifyScanner implements \Integrum\SecurityScanner\Contracts\Scanne
 
 		$this->store->delete_failures( $scan_job_id );
 
-		$body   = $results['body'];
 		$status = $this->normalise_status( (string) ( $body['status'] ?? 'processing' ) );
+
+		// Keep the per-job state alive while the poller keeps polling: extend
+		// the transients' TTL so long scans do not lose their file map.
+		if ( 'processing' === $status ) {
+			$this->store->refresh_ttl( $scan_job_id );
+		}
 
 		// Surface the first file that is still pending an action. The real API
 		// exposes only file_index (not a path), so we resolve the human-readable
-		// path from the manifest map stored at scan start.
-		$map          = $this->store->load_file_map( $scan_job_id );
-		$paths        = is_array( $map['paths'] ?? null ) ? $map['paths'] : array();
+		// path from the manifest map stored at scan start ($map loaded above).
 		$current_file = '';
 		foreach ( (array) ( $body['files'] ?? array() ) as $row ) {
 			if ( ! is_array( $row ) ) {
@@ -329,6 +376,72 @@ final class ImunifyScanner implements \Integrum\SecurityScanner\Contracts\Scanne
 	 */
 	private function fetch_results( string $job_id, string $key ): array {
 		return $this->call( 'GET', '/jobs/' . rawurlencode( $job_id ) . '/results', $key );
+	}
+
+	/**
+	 * True when the per-job state has expired while the job still needs it.
+	 *
+	 * The file map / done set / progress transients expire after an hour. A
+	 * job that is still processing AND still reports pending client actions
+	 * (needs_sha256 / needs_upload) can never finish without that state, so
+	 * it must be surfaced as failed instead of spinning in "processing".
+	 *
+	 * @param array<string, mixed> $map  Stored file map (empty when expired).
+	 * @param array<string, mixed> $body Last /results body.
+	 */
+	private function job_state_expired( array $map, array $body ): bool {
+		if ( array() !== $map ) {
+			return false; // State is alive.
+		}
+
+		if ( ! empty( $body['is_complete'] ) ) {
+			return false; // Job finished; nothing left to drive.
+		}
+
+		if ( 'processing' !== $this->normalise_status( (string) ( $body['status'] ?? 'processing' ) ) ) {
+			return false; // Job already terminal server-side.
+		}
+
+		foreach ( (array) ( $body['files'] ?? array() ) as $row ) {
+			if ( is_array( $row ) && 'has_verdict' !== (string) ( $row['action'] ?? '' ) ) {
+				return true; // Pending client work, but the state to do it is gone.
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Counts pending needs_* actions whose file_index is not in the map.
+	 *
+	 * Such actions can never be satisfied (the index did not come from our
+	 * manifest), so the job would loop forever. A count > 0 means the job
+	 * should fail fast.
+	 *
+	 * @param array<string, mixed> $body  Last /results body.
+	 * @param array<int, string>   $paths file_index => relative path.
+	 */
+	private function count_unresolvable_actions( array $body, array $paths ): int {
+		$count = 0;
+
+		foreach ( (array) ( $body['files'] ?? array() ) as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+
+			$action = (string) ( $row['action'] ?? '' );
+			if ( ! in_array( $action, array( 'needs_sha256', 'needs_upload' ), true ) ) {
+				continue;
+			}
+
+			$file_index = (int) ( $row['file_index'] ?? -1 );
+			$rel        = (string) ( $paths[ $file_index ] ?? '' );
+			if ( '' === $rel ) {
+				++$count;
+			}
+		}
+
+		return $count;
 	}
 
 	/**

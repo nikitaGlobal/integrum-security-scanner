@@ -12,6 +12,12 @@ import { refreshHistory } from './history.js';
 
 const STATUS_INTERVAL_MS = 4000;
 const STATUSES_DONE = [ 'completed', 'done', 'failed' ];
+const MAX_RETRY_DELAY_MS = 30000;
+// Give up after this many consecutive transport-level failures (network
+// error, 5xx, malformed response). The PHP side escalates a failing job on
+// its own; this cap only stops the client from retrying forever when the
+// server is unreachable.
+const MAX_CONSECUTIVE_ERRORS = 5;
 
 /**
  * Estimates remaining seconds from the scanned-bytes rate over the sample
@@ -65,12 +71,42 @@ export function initPolling( jobId ) {
 	// history, so a temporary slowdown does not distort the estimate forever.
 	let samples = [];
 
+	// Consecutive transport-level poll failures (network / 5xx / bad JSON).
+	// A single hiccup must not kill the poller — the scan would look frozen
+	// while the job keeps running server-side.
+	let consecutiveErrors = 0;
+
 	function pollStatus() {
 		fetchJSON( 'integrum_security_scanner_status', { job_id: jobId } )
-			.then( onStatus )
+			.then( function ( payload ) {
+				consecutiveErrors = 0;
+				onStatus( payload );
+			} )
 			.catch( function () {
-				progressLabel.textContent = CFG.i18n ? CFG.i18n.error : 'error';
+				handlePollFailure();
 			} );
+	}
+
+	/**
+	 * Retries a failed status poll with exponential backoff instead of
+	 * abandoning the scan UI. Stops after MAX_CONSECUTIVE_ERRORS so an
+	 * unreachable server does not produce an endless retry loop.
+	 */
+	function handlePollFailure() {
+		if ( window.__llarStopped ) {
+			return; // Stop requested via the Stop button.
+		}
+
+		++consecutiveErrors;
+
+		if ( consecutiveErrors >= MAX_CONSECUTIVE_ERRORS ) {
+			progressLabel.textContent = CFG.i18n ? CFG.i18n.error : 'error';
+			return;
+		}
+
+		progressLabel.textContent = ( CFG.i18n && CFG.i18n.retrying ) || 'Connection lost, retrying…';
+		const delay = Math.min( STATUS_INTERVAL_MS * Math.pow( 2, consecutiveErrors ), MAX_RETRY_DELAY_MS );
+		window.setTimeout( pollStatus, delay );
 	}
 
 	function onStatus( payload ) {

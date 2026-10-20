@@ -17,3 +17,7 @@ wp-includes/
 
 # Temp
 *.log
+
+# Dev tooling
+/vendor/
+/.phpunit.cache/

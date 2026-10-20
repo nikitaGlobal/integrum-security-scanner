@@ -86,4 +86,16 @@ interface JobStoreInterface {
 	 * @param string $job_id Job id.
 	 */
 	public function delete_failures( string $job_id ): void;
+
+	/**
+	 * Extends the lifetime of the stored state for a job.
+	 *
+	 * The state is kept in transients with a fixed TTL. A long scan outlives
+	 * it (uploads are capped per poll, so big sites legitimately run for
+	 * hours), so every successful poll refreshes the TTL. Implementations
+	 * without a TTL (in-memory stores) may no-op.
+	 *
+	 * @param string $job_id Job id.
+	 */
+	public function refresh_ttl( string $job_id ): void;
 }
