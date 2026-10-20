@@ -33,6 +33,21 @@ if ( ! function_exists( '__' ) ) {
 	}
 }
 
+if ( ! function_exists( 'apply_filters' ) ) {
+	/**
+	 * Filter stub: reads the value from $GLOBALS['__llar_filters'].
+	 *
+	 * @param string $hook  Filter name.
+	 * @param mixed  $value Default value.
+	 * @param mixed  ...$args Extra arguments (unused).
+	 * @return mixed
+	 */
+	// phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundAfterLastUsed -- WP signature.
+	function apply_filters( string $hook, $value, ...$args ) {
+		return $GLOBALS['__llar_filters'][ $hook ] ?? $value;
+	}
+}
+
 if ( ! function_exists( 'is_email' ) ) {
 	/**
 	 * Minimal email validation stub.
